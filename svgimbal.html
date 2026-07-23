@@ -1,0 +1,1788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Extrude — SVG to 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{
+    --shell:#0d0d0f;
+    --stage:#131316;
+    --paper:#ded9cc;
+    --well:#cfc8b6;
+    --rule:#aea48f;
+    --ink:#191919;
+    --ink-soft:#615c50;
+    --mark:#2f6b5e;
+    --flag:#9c4529;
+    --mono:'Spline Sans Mono', ui-monospace, monospace;
+    --disp:'Archivo', ui-sans-serif, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  [hidden]{display:none !important;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--shell);
+    color:var(--paper);
+    font-family:var(--mono);
+    font-size:12px;
+    line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  button,input,select{font-family:inherit;font-size:inherit;color:inherit;}
+
+  .app{display:flex;flex-direction:column;height:100%;}
+
+  /* ---------- top rail ---------- */
+  .topbar{
+    height:46px;flex:0 0 46px;
+    display:flex;align-items:center;gap:10px;
+    padding:0 10px 0 16px;
+    background:var(--shell);
+    border-bottom:1px solid #000;
+  }
+  .brand{
+    font-family:var(--disp);font-weight:700;font-size:15px;
+    letter-spacing:-0.02em;color:var(--paper);
+  }
+  .brand em{
+    font-style:normal;font-family:var(--mono);font-weight:400;
+    font-size:10px;letter-spacing:.18em;text-transform:uppercase;
+    color:#6f6a5f;margin-left:9px;
+  }
+  .filename{
+    font-size:11px;color:#8b8578;
+    max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    padding-left:12px;margin-left:2px;border-left:1px solid #2a2a30;
+  }
+  .spacer{flex:1;}
+
+  .btn{
+    height:28px;padding:0 11px;
+    border:1px solid #35353c;background:transparent;color:#c3bdb0;
+    font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+    border-radius:2px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:7px;
+    transition:background 120ms ease,color 120ms ease,border-color 120ms ease;
+  }
+  .btn:hover{background:#1a1a1f;color:var(--paper);border-color:#4e4e57;}
+  .btn.primary{background:var(--paper);border-color:var(--paper);color:var(--ink);}
+  .btn.primary:hover{background:#fff;border-color:#fff;}
+  .btn:disabled{opacity:.35;cursor:not-allowed;}
+  .btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:square;}
+  :focus-visible{outline:2px solid var(--mark);outline-offset:1px;}
+
+  .main{flex:1;display:flex;min-height:0;}
+
+  /* ---------- stage ---------- */
+  .viewport{flex:1;position:relative;min-width:0;background:var(--stage);}
+  #stage{position:absolute;inset:0;}
+  #stage canvas{display:block;width:100%;height:100%;}
+  .checker{
+    background-image:
+      linear-gradient(45deg,#1d1d20 25%,transparent 25%),
+      linear-gradient(-45deg,#1d1d20 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#1d1d20 75%),
+      linear-gradient(-45deg,transparent 75%,#1d1d20 75%);
+    background-size:16px 16px;
+    background-position:0 0,0 8px,8px -8px,-8px 0;
+    background-color:#161619;
+  }
+  /* title block */
+  .readout{
+    position:absolute;left:16px;bottom:16px;display:flex;
+    border:1px solid rgba(222,217,204,.24);
+    font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:#9c9689;
+    pointer-events:none;
+  }
+  .readout span{padding:4px 10px;border-left:1px solid rgba(222,217,204,.24);}
+  .readout span:first-child{border-left:0;color:var(--paper);}
+  .hint{
+    position:absolute;right:16px;bottom:16px;
+    font-size:10px;letter-spacing:.04em;color:#5f5b53;pointer-events:none;
+  }
+  .notices{position:absolute;left:16px;top:16px;right:16px;display:flex;flex-direction:column;gap:6px;align-items:flex-start;}
+  .notice{
+    background:rgba(20,20,22,.94);border:1px solid #2f2f35;border-left:2px solid var(--flag);
+    padding:7px 11px;font-size:11px;line-height:1.5;color:#bdb7aa;max-width:520px;
+  }
+
+  .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center;padding:24px;}
+  .empty p{margin:0;color:#8b8578;max-width:330px;font-size:11.5px;line-height:1.65;}
+  .empty .row{display:flex;gap:8px;}
+  .dropring{position:absolute;inset:18px;border:1px dashed #3a3a41;pointer-events:none;opacity:0;transition:opacity 120ms ease,border-color 120ms ease;}
+  .viewport.dragging .dropring{opacity:1;border-color:var(--mark);}
+
+  /* ---------- spec sheet ---------- */
+  .panel{
+    width:292px;flex:0 0 292px;
+    background:var(--paper);
+    background-image:repeating-linear-gradient(0deg,rgba(0,0,0,.016) 0 1px,transparent 1px 3px);
+    color:var(--ink);
+    border-left:1px solid #000;
+    overflow-y:auto;
+  }
+  .panel::-webkit-scrollbar{width:10px;}
+  .panel::-webkit-scrollbar-track{background:var(--well);}
+  .panel::-webkit-scrollbar-thumb{background:#9c937d;border:2px solid var(--well);}
+
+  .group{padding:16px 16px 18px;border-bottom:1px solid var(--rule);}
+  .group:last-child{border-bottom:0;}
+  .group h2{
+    display:flex;align-items:center;gap:10px;margin:0 0 13px;
+    font-size:10px;font-weight:600;letter-spacing:.17em;text-transform:uppercase;color:var(--ink-soft);
+  }
+  .group h2::after{content:"";flex:1;height:1px;background:var(--rule);}
+
+  .field{margin-bottom:12px;}
+  .field:last-child{margin-bottom:0;}
+  .field-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:1px;}
+  .field label{font-size:11px;color:var(--ink-soft);}
+  .val{
+    font-size:10px;letter-spacing:.02em;color:var(--ink);
+    background:var(--well);border:1px solid var(--rule);
+    padding:0 5px;line-height:15px;min-width:44px;text-align:center;
+  }
+
+  /* slide-rule cursor */
+  .gauge{position:relative;height:22px;}
+  .gauge::before{
+    content:"";position:absolute;left:0;right:0;top:4px;height:6px;pointer-events:none;
+    background:repeating-linear-gradient(90deg,var(--rule) 0 1px,transparent 1px 9px);
+  }
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;position:relative;z-index:1;
+    width:100%;height:22px;background:transparent;display:block;cursor:ew-resize;margin:0;
+  }
+  input[type=range]::-webkit-slider-runnable-track{height:1px;background:var(--ink);}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;box-sizing:border-box;width:11px;height:20px;margin-top:-10px;
+    border:1px solid var(--ink);border-radius:0;
+    background:linear-gradient(90deg,transparent 0 4px,var(--ink) 4px 5px,transparent 5px 11px),var(--paper);
+    transition:background-color 120ms ease;
+  }
+  input[type=range]:hover::-webkit-slider-thumb{background-color:#fff;}
+  input[type=range]:active::-webkit-slider-thumb{border-color:var(--mark);}
+  input[type=range]::-moz-range-track{height:1px;background:var(--ink);}
+  input[type=range]::-moz-range-thumb{
+    box-sizing:border-box;width:11px;height:20px;border:1px solid var(--ink);border-radius:0;background:var(--paper);
+  }
+
+  /* section drawing */
+  .drawing{
+    border:1px solid var(--rule);background:var(--well);
+    margin-bottom:14px;
+  }
+  .drawing svg{display:block;width:100%;height:auto;}
+  .drawing figcaption{
+    display:flex;justify-content:space-between;
+    border-top:1px solid var(--rule);padding:3px 7px;
+    font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);
+  }
+
+  .seg{display:flex;border:1px solid var(--ink);}
+  .seg .chip{
+    flex:1;height:26px;padding:0;border:0;border-left:1px solid var(--ink);
+    background:transparent;color:var(--ink-soft);
+    font-size:10px;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;
+    transition:background 110ms ease,color 110ms ease;
+  }
+  .seg .chip:first-child{border-left:0;}
+  .seg .chip:hover{background:var(--well);color:var(--ink);}
+  .seg .chip[aria-pressed="true"]{background:var(--ink);color:var(--paper);}
+
+  .mats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+  .mat{
+    padding:6px 2px 5px;border:1px solid var(--rule);background:var(--well);
+    border-radius:0;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px;
+    transition:background 110ms ease,border-color 110ms ease;
+  }
+  .mat i{
+    width:26px;height:26px;border-radius:50%;display:block;
+    box-shadow:inset 0 -3px 7px rgba(0,0,0,.42), 0 1px 2px rgba(0,0,0,.25);
+  }
+  .mat span{font-size:8px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-soft);line-height:1;}
+  .mat:hover{border-color:var(--ink);}
+  .mat[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);}
+  .mat[aria-pressed="true"] span{color:var(--paper);}
+
+  select{
+    width:100%;height:28px;border:1px solid var(--ink);border-radius:0;
+    background-color:var(--well);color:var(--ink);
+    font-size:11px;padding:0 24px 0 8px;appearance:none;cursor:pointer;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='6' viewBox='0 0 9 6'><path d='M0 0h9L4.5 6z' fill='%23191919'/></svg>");
+    background-repeat:no-repeat;background-position:right 8px center;
+  }
+  .swatchrow{display:flex;align-items:center;gap:9px;}
+  input[type=color]{
+    width:32px;height:26px;padding:2px;border:1px solid var(--ink);border-radius:0;
+    background:var(--well);cursor:pointer;flex:0 0 auto;
+  }
+  input[type=color]::-webkit-color-swatch-wrapper{padding:0;}
+  input[type=color]::-webkit-color-swatch{border:none;border-radius:0;}
+  .hex{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);}
+
+  .toggle{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:7px 0;border-top:1px dotted var(--rule);
+  }
+  .toggle span{font-size:11px;color:var(--ink-soft);}
+  .plate{
+    width:34px;height:18px;flex:0 0 auto;padding:0;position:relative;cursor:pointer;
+    border:1px solid var(--ink);border-radius:0;background:var(--well);
+    transition:background 130ms ease,border-color 130ms ease;
+  }
+  .plate::after{
+    content:"";position:absolute;top:2px;left:2px;width:13px;height:12px;background:var(--ink);
+    transition:transform 130ms ease,background 130ms ease;
+  }
+  .plate[aria-pressed="true"]{background:var(--mark);border-color:var(--mark);}
+  .plate[aria-pressed="true"]::after{transform:translateX(15px);background:var(--paper);}
+
+  .panel .btn{border-color:var(--ink);color:var(--ink);}
+  .panel .btn:hover{background:var(--well);color:var(--ink);border-color:var(--ink);}
+  .panel .btn.primary{background:var(--ink);border-color:var(--ink);color:var(--paper);}
+  .panel .btn.primary:hover{background:var(--mark);border-color:var(--mark);color:var(--paper);}
+
+  .btnrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .btnrow .btn{justify-content:center;height:30px;padding:0 6px;}
+  .row2{display:grid;grid-template-columns:1fr 74px;gap:8px;}
+  .stack{display:flex;flex-direction:column;gap:9px;}
+  .note{margin:10px 0 0;font-size:10px;line-height:1.6;color:var(--ink-soft);}
+
+  @media (max-width:840px){
+    .main{flex-direction:column;}
+    .panel{width:100%;flex:0 0 auto;max-height:48%;border-left:0;border-top:1px solid #000;}
+    .filename{display:none;}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none !important;}}
+  #sandbox{position:fixed;left:-20000px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">Extrude<em>svg to 3d</em></div>
+    <div class="filename" id="filename">no file</div>
+    <div class="spacer"></div>
+    <button class="btn" id="btnOpen">
+      <svg viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M4 15v5h16v-5"/></svg>
+      Open SVG
+    </button>
+    <button class="btn" id="btnReset">Reset view</button>
+    <button class="btn primary" id="btnExport" disabled>Export</button>
+    <input type="file" id="file" accept=".svg,image/svg+xml" hidden />
+  </header>
+
+  <div class="main">
+    <div class="viewport" id="viewport">
+      <div id="stage"></div>
+      <div class="dropring"></div>
+      <div class="notices" id="notices"></div>
+
+      <div class="empty" id="empty">
+        <p>Drop an SVG here to extrude it. Filled paths work best — outline any strokes or text first.</p>
+        <div class="row">
+          <button class="btn primary" id="btnPick">Choose a file</button>
+          <button class="btn" id="btnSample">Load sample</button>
+        </div>
+      </div>
+
+      <div class="readout" id="readout" hidden>
+        <span id="statShapes">0 shapes</span>
+        <span id="statTris">0 triangles</span>
+      </div>
+      <div class="hint" id="hint" hidden>Drag the model to move it · drag the background to orbit · scroll to zoom</div>
+    </div>
+
+    <aside class="panel">
+      <section class="group">
+        <h2>Shape</h2>
+
+        <figure class="drawing">
+          <svg viewBox="0 0 260 112" xmlns="http://www.w3.org/2000/svg" aria-label="Section through the extrusion">
+            <defs>
+              <pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <line x1="0" y1="0" x2="0" y2="5" stroke="#191919" stroke-width="0.6" opacity="0.5"/>
+              </pattern>
+            </defs>
+            <g stroke="#615c50" stroke-width="0.5" fill="none">
+              <path id="pExtH" d=""/>
+              <path id="pExtV" d=""/>
+            </g>
+            <path id="pSlab" d="" fill="url(#hatch)" stroke="#191919" stroke-width="1"/>
+            <g stroke="#191919" stroke-width="0.7" fill="none">
+              <path id="pDimH" d=""/>
+              <path id="pDimV" d=""/>
+              <path id="pLead" d=""/>
+            </g>
+            <text id="tDepth" x="130" y="102" font-family="'Spline Sans Mono',monospace" font-size="9" fill="#191919" text-anchor="middle">0.16</text>
+            <text id="tFace" x="30" y="50" font-family="'Spline Sans Mono',monospace" font-size="9" fill="#191919" text-anchor="middle" transform="rotate(-90 30 50)">1.00</text>
+            <text id="tBevel" x="200" y="20" font-family="'Spline Sans Mono',monospace" font-size="8.5" fill="#615c50">0.8%</text>
+          </svg>
+          <figcaption><span>Section A–A</span><span id="capUnits">units · face = 1.00</span></figcaption>
+        </figure>
+
+        <div class="field">
+          <div class="field-head"><label for="depth">Depth</label><span class="val" id="vDepth"></span></div>
+          <div class="gauge"><input type="range" id="depth" min="0" max="60" step="1" value="16" /></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="bevel">Bevel</label><span class="val" id="vBevel"></span></div>
+          <div class="gauge"><input type="range" id="bevel" min="0" max="40" step="1" value="8" /></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="bevelSeg">Bevel smoothness</label><span class="val" id="vBevelSeg"></span></div>
+          <div class="gauge"><input type="range" id="bevelSeg" min="1" max="8" step="1" value="3" /></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="quality">Curve detail</label><span class="val" id="vQuality"></span></div>
+          <div class="gauge"><input type="range" id="quality" min="1" max="5" step="1" value="3" /></div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Position</h2>
+        <div class="field">
+          <div class="field-head"><label for="rotX">Tilt</label><span class="val" id="vRotX"></span></div>
+          <div class="gauge"><input type="range" id="rotX" min="-90" max="90" step="1" value="0" /></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="rotY">Turn</label><span class="val" id="vRotY"></span></div>
+          <div class="gauge"><input type="range" id="rotY" min="-90" max="90" step="1" value="0" /></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="rotZ">Roll</label><span class="val" id="vRotZ"></span></div>
+          <div class="gauge"><input type="range" id="rotZ" min="-180" max="180" step="1" value="0" /></div>
+        </div>
+        <div class="toggle"><span>Spin the model</span><button class="plate" id="spin" aria-pressed="false" aria-label="Spin the model"></button></div>
+        <div class="field" style="margin-top:11px;">
+          <div class="field-head"><label for="spinSpeed">Spin speed</label><span class="val" id="vSpinSpeed"></span></div>
+          <div class="gauge"><input type="range" id="spinSpeed" min="10" max="180" step="5" value="45" /></div>
+        </div>
+        <div class="btnrow">
+          <button class="btn" id="btnResetAngles">Reset angles</button>
+          <button class="btn" id="btnRecentre">Return camera</button>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Material</h2>
+        <div class="field">
+          <div class="mats" id="matPreset">
+            <button class="mat" data-preset="matte" aria-pressed="true"><i style="background:radial-gradient(circle at 34% 28%,#f2ece0,#b9b1a1 58%,#87806f)"></i><span>Matte</span></button>
+            <button class="mat" data-preset="plastic" aria-pressed="false"><i style="background:radial-gradient(circle at 31% 24%,#ffffff,#ded8ca 42%,#8d8678)"></i><span>Plastic</span></button>
+            <button class="mat" data-preset="metal" aria-pressed="false"><i style="background:radial-gradient(circle at 33% 26%,#ffffff,#9ba1a7 46%,#4b5057)"></i><span>Metal</span></button>
+            <button class="mat" data-preset="chrome" aria-pressed="false"><i style="background:radial-gradient(circle at 28% 20%,rgba(255,255,255,.95) 10%,rgba(255,255,255,0) 42%),linear-gradient(180deg,#eef3f7 0 47%,#33393f 47%,#aab3bb 78%,#5e666d)"></i><span>Chrome</span></button>
+            <button class="mat" data-preset="gold" aria-pressed="false"><i style="background:radial-gradient(circle at 32% 25%,#fff4c6,#e2b84c 46%,#8a6415)"></i><span>Gold</span></button>
+            <button class="mat" data-preset="copper" aria-pressed="false"><i style="background:radial-gradient(circle at 32% 25%,#ffdcc0,#b87333 46%,#693c17)"></i><span>Copper</span></button>
+            <button class="mat" data-preset="gradient" aria-pressed="false"><i style="background:radial-gradient(circle at 30% 22%,rgba(255,255,255,.75) 8%,rgba(255,255,255,0) 45%),linear-gradient(155deg,#e0459b,#4b2fd6)"></i><span>Gradient</span></button>
+            <button class="mat" data-preset="glass" aria-pressed="false"><i style="background:radial-gradient(circle at 30% 24%,#ffffff,rgba(214,232,238,.55) 45%,rgba(105,135,146,.85))"></i><span>Glass</span></button>
+          </div>
+        </div>
+        <div id="colourBlock">
+          <div class="field">
+            <div class="field-head"><label>Colour</label></div>
+            <div class="seg" id="colorMode">
+              <button class="chip" data-mode="svg" aria-pressed="true">From SVG</button>
+              <button class="chip" data-mode="single" aria-pressed="false">One colour</button>
+            </div>
+          </div>
+          <div class="field" id="singleColorField" hidden>
+            <div class="swatchrow">
+              <input type="color" id="baseColor" value="#d8d5cf" />
+              <span class="hex" id="hexBase">#d8d5cf</span>
+            </div>
+          </div>
+        </div>
+        <div class="field" id="gradientField" hidden>
+          <div class="field-head"><label>Gradient</label></div>
+          <div class="swatchrow">
+            <input type="color" id="gradA" value="#e0459b" />
+            <input type="color" id="gradB" value="#4b2fd6" />
+            <span class="hex" id="hexGrad">top to bottom</span>
+          </div>
+        </div>
+        <p class="note" id="tintNote" hidden>This finish sets its own colour.</p>
+        <div class="field">
+          <div class="field-head"><label for="metalness">Metalness</label><span class="val" id="vMetal"></span></div>
+          <div class="gauge"><input type="range" id="metalness" min="0" max="100" step="1" value="0" /></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="roughness">Roughness</label><span class="val" id="vRough"></span></div>
+          <div class="gauge"><input type="range" id="roughness" min="0" max="100" step="1" value="45" /></div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Scene</h2>
+        <div class="field">
+          <div class="field-head"><label for="lighting">Lighting</label></div>
+          <select id="lighting">
+            <option value="studio">Studio</option>
+            <option value="soft">Soft</option>
+            <option value="contrast">Contrast</option>
+            <option value="rim">Rim</option>
+          </select>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="exposure">Brightness</label><span class="val" id="vExposure"></span></div>
+          <div class="gauge"><input type="range" id="exposure" min="30" max="200" step="1" value="100" /></div>
+        </div>
+        <div class="field">
+          <div class="field-head"><label for="bgColor">Background</label></div>
+          <div class="swatchrow">
+            <input type="color" id="bgColor" value="#131316" />
+            <span class="hex" id="hexBg">#131316</span>
+          </div>
+        </div>
+        <div class="toggle"><span>Transparent background</span><button class="plate" id="transparent" aria-pressed="false" aria-label="Transparent background"></button></div>
+        <div class="toggle"><span>Ground shadow</span><button class="plate" id="shadow" aria-pressed="true" aria-label="Ground shadow"></button></div>
+      </section>
+
+      <section class="group">
+        <h2>Export</h2>
+        <div class="stack">
+          <div class="row2">
+            <select id="format">
+              <option value="png">PNG image</option>
+              <option value="glb">GLB model</option>
+              <option value="obj">OBJ model</option>
+              <option value="stl">STL model</option>
+              <option value="gif">GIF spin</option>
+            </select>
+            <select id="pngScale">
+              <option value="1">1×</option>
+              <option value="2" selected>2×</option>
+              <option value="4">4×</option>
+            </select>
+            <select id="gifSize" hidden>
+              <option value="360">360</option>
+              <option value="480" selected>480</option>
+              <option value="640">640</option>
+            </select>
+          </div>
+          <button class="btn primary" id="btnExport2" disabled style="justify-content:center;height:30px;">Export</button>
+        </div>
+        <p class="note" id="exportNote">PNG uses the current view at 2× the canvas size.</p>
+      </section>
+    </aside>
+  </div>
+
+<div id="sandbox"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   State
+   ============================================================ */
+const state = {
+  depth: 0.16,          // fraction of model size
+  bevel: 0.008,         // fraction of model size
+  bevelSeg: 3,
+  quality: 3,
+  rotX: 0, rotY: 0, rotZ: 0,
+  spin: false,
+  spinSpeed: 45,   // degrees per second
+  preset: 'matte',
+  colorMode: 'svg',
+  baseColor: '#d8d5cf',
+  gradA: '#e0459b',
+  gradB: '#4b2fd6',
+  metalness: 0,
+  roughness: 0.45,
+  lighting: 'studio',
+  exposure: 1,
+  bgColor: '#131316',
+  transparent: false,
+  shadow: true
+};
+
+let parsed = null;      // { groups, unit, cx, cy, warnings }
+let sourceSVG = null;   // raw text of the loaded file
+let fileBase = 'model';
+
+const el = id => document.getElementById(id);
+const stage = el('stage');
+const viewport = el('viewport');
+
+/* ============================================================
+   Three.js setup
+   ============================================================ */
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, preserveDrawingBuffer:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x000000, 0);
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+
+const wrapper = new THREE.Object3D();   // holds rotation + scale
+const inner = new THREE.Object3D();     // holds centring offset
+wrapper.add(inner);
+scene.add(wrapper);
+
+// contact shadow catcher
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(24, 24),
+  new THREE.ShadowMaterial({ opacity: 0.34 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -1.55;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// lights
+const key = new THREE.DirectionalLight(0xffffff, 2.1);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.near = 0.5;
+key.shadow.camera.far = 20;
+key.shadow.camera.left = -3; key.shadow.camera.right = 3;
+key.shadow.camera.top = 3;  key.shadow.camera.bottom = -3;
+key.shadow.bias = -0.0006;
+key.shadow.radius = 3;
+const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+const rim  = new THREE.DirectionalLight(0xffffff, 0.9);
+const amb  = new THREE.HemisphereLight(0xffffff, 0x202020, 0.35);
+scene.add(key, fill, rim, amb);
+
+// procedural studio environment (gives materials something to reflect)
+function buildEnvironment(){
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  const g = c.getContext('2d');
+  // bright sky over a dark floor, with a hard horizon — metals need edges to catch
+  const sky = g.createLinearGradient(0, 0, 0, 132);
+  sky.addColorStop(0, '#ffffff');
+  sky.addColorStop(1, '#8e8e8e');
+  g.fillStyle = sky; g.fillRect(0, 0, 512, 132);
+  const floor = g.createLinearGradient(0, 132, 0, 256);
+  floor.addColorStop(0, '#3c3c3c');
+  floor.addColorStop(1, '#0c0c0c');
+  g.fillStyle = floor; g.fillRect(0, 132, 512, 124);
+
+  // softbox panels
+  const panels = [[70, 18, 120, 62], [300, 8, 90, 78], [420, 30, 60, 46]];
+  for (const [x, y, w, h] of panels){
+    const lg = g.createLinearGradient(x, y, x, y + h);
+    lg.addColorStop(0, 'rgba(255,255,255,1)');
+    lg.addColorStop(1, 'rgba(255,255,255,0.15)');
+    g.fillStyle = lg; g.fillRect(x, y, w, h);
+  }
+  // a couple of dark strips so chrome gets contrast rather than a flat wash
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.fillRect(210, 0, 26, 132);
+  g.fillRect(478, 0, 18, 132);
+
+  const blobs = [[150, 176, 150, 40, 0.32], [390, 190, 110, 30, 0.2]];
+  for (const [x, y, rx, ry, a] of blobs){
+    const rg = g.createRadialGradient(x, y, 0, x, y, rx);
+    rg.addColorStop(0, 'rgba(255,255,255,' + a + ')');
+    rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg;
+    g.save(); g.translate(x, y); g.scale(1, ry / rx); g.beginPath();
+    g.arc(0, 0, rx, 0, Math.PI * 2); g.fill(); g.restore();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  pmrem.compileEquirectangularShader();
+  const rt = pmrem.fromEquirectangular(tex);
+  scene.environment = rt.texture;
+  tex.dispose();
+  pmrem.dispose();
+}
+buildEnvironment();
+
+/* ============================================================
+   Orbit camera (hand-rolled, with damping)
+   ============================================================ */
+const orbit = {
+  theta: -0.42, phi: 1.28, radius: 4.6,
+  tTheta: -0.42, tPhi: 1.28, tRadius: 4.6,
+  target: new THREE.Vector3(0, 0, 0),
+  tTarget: new THREE.Vector3(0, 0, 0),
+  dragging: false, mode: null, lastX: 0, lastY: 0, pinch: 0
+};
+
+function resetView(){
+  orbit.tTheta = -0.42; orbit.tPhi = 1.28; orbit.tRadius = 4.6;
+  orbit.tTarget.set(0, 0, 0);
+  wrapper.position.set(0, 0, 0);
+  spinAngle = 0;
+}
+
+/* pick the model under the cursor so it can be dragged directly */
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const dragPlane = new THREE.Plane();
+const dragOffset = new THREE.Vector3();
+const planeHit = new THREE.Vector3();
+const camDir = new THREE.Vector3();
+let lastHoverTest = 0;
+
+function setNDC(e){
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+}
+function hitModel(e){
+  if (!meshes.length) return null;
+  setNDC(e);
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects(meshes, false);
+  return hits.length ? hits[0] : null;
+}
+function setCursor(c){
+  if (renderer.domElement.style.cursor !== c) renderer.domElement.style.cursor = c;
+}
+
+function updateCamera(){
+  orbit.theta += (orbit.tTheta - orbit.theta) * 0.18;
+  orbit.phi   += (orbit.tPhi - orbit.phi) * 0.18;
+  orbit.radius += (orbit.tRadius - orbit.radius) * 0.18;
+  orbit.target.lerp(orbit.tTarget, 0.18);
+  const r = orbit.radius, p = orbit.phi, t = orbit.theta;
+  camera.position.set(
+    orbit.target.x + r * Math.sin(p) * Math.sin(t),
+    orbit.target.y + r * Math.cos(p),
+    orbit.target.z + r * Math.sin(p) * Math.cos(t)
+  );
+  camera.lookAt(orbit.target);
+}
+
+function pointerDown(e){
+  if (e.button === 1) e.preventDefault();
+  const wantsPan = (e.button === 2 || e.button === 1 || e.shiftKey);
+  orbit.mode = 'rotate';
+  if (wantsPan){
+    orbit.mode = 'pan';
+  } else {
+    const hit = hitModel(e);
+    if (hit){
+      orbit.mode = 'move';
+      camera.getWorldDirection(camDir);
+      dragPlane.setFromNormalAndCoplanarPoint(camDir, wrapper.position);
+      dragOffset.copy(wrapper.position).sub(hit.point);
+      setCursor('grabbing');
+    }
+  }
+  orbit.dragging = true;
+  orbit.lastX = e.clientX; orbit.lastY = e.clientY;
+  renderer.domElement.setPointerCapture(e.pointerId);
+}
+function pointerMove(e){
+  if (!orbit.dragging){
+    const now = performance.now();
+    if (now - lastHoverTest > 60){
+      lastHoverTest = now;
+      setCursor(hitModel(e) ? 'grab' : 'default');
+    }
+    return;
+  }
+  if (orbit.mode === 'move'){
+    setNDC(e);
+    raycaster.setFromCamera(ndc, camera);
+    if (raycaster.ray.intersectPlane(dragPlane, planeHit)){
+      wrapper.position.copy(planeHit).add(dragOffset);
+    }
+    return;
+  }
+  const dx = e.clientX - orbit.lastX, dy = e.clientY - orbit.lastY;
+  orbit.lastX = e.clientX; orbit.lastY = e.clientY;
+  if (orbit.mode === 'rotate'){
+    orbit.tTheta -= dx * 0.007;
+    orbit.tPhi = Math.max(0.06, Math.min(Math.PI - 0.06, orbit.tPhi - dy * 0.007));
+  } else {
+    const scale = orbit.radius * 0.0018;
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+    orbit.tTarget.addScaledVector(right, -dx * scale).addScaledVector(up, dy * scale);
+  }
+}
+function pointerUp(e){
+  if (orbit.mode === 'move') setCursor('grab');
+  orbit.dragging = false;
+  orbit.mode = null;
+  try { renderer.domElement.releasePointerCapture(e.pointerId); } catch(_){}
+}
+renderer.domElement.addEventListener('pointerdown', pointerDown);
+renderer.domElement.addEventListener('pointermove', pointerMove);
+renderer.domElement.addEventListener('pointerup', pointerUp);
+renderer.domElement.addEventListener('pointercancel', pointerUp);
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+renderer.domElement.addEventListener('wheel', e => {
+  e.preventDefault();
+  orbit.tRadius = Math.max(1.4, Math.min(20, orbit.tRadius * (1 + Math.sign(e.deltaY) * 0.09)));
+}, { passive:false });
+
+// pinch zoom
+renderer.domElement.addEventListener('touchmove', e => {
+  if (e.touches.length !== 2) return;
+  const d = Math.hypot(
+    e.touches[0].clientX - e.touches[1].clientX,
+    e.touches[0].clientY - e.touches[1].clientY
+  );
+  if (orbit.pinch) orbit.tRadius = Math.max(1.4, Math.min(20, orbit.tRadius * (orbit.pinch / d)));
+  orbit.pinch = d;
+  e.preventDefault();
+}, { passive:false });
+renderer.domElement.addEventListener('touchend', () => { orbit.pinch = 0; });
+
+/* ============================================================
+   Geometry helpers
+   ============================================================ */
+function signedArea(p){
+  let a = 0;
+  for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += p[j].x * p[i].y - p[i].x * p[j].y;
+  return a / 2;
+}
+function pointInPoly(pt, poly){
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++){
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+// Ramer–Douglas–Peucker
+function simplify(pts, tol){
+  if (pts.length < 5) return pts;
+  const keep = new Uint8Array(pts.length);
+  keep[0] = keep[pts.length - 1] = 1;
+  const stack = [[0, pts.length - 1]];
+  const tol2 = tol * tol;
+  while (stack.length){
+    const [s, e] = stack.pop();
+    let maxD = -1, idx = -1;
+    const ax = pts[s].x, ay = pts[s].y, bx = pts[e].x, by = pts[e].y;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    for (let i = s + 1; i < e; i++){
+      const px = pts[i].x - ax, py = pts[i].y - ay;
+      let t = len2 ? (px * dx + py * dy) / len2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const qx = px - dx * t, qy = py - dy * t;
+      const d = qx * qx + qy * qy;
+      if (d > maxD){ maxD = d; idx = i; }
+    }
+    if (maxD > tol2 && idx > 0){
+      keep[idx] = 1;
+      stack.push([s, idx], [idx, e]);
+    }
+  }
+  const out = [];
+  for (let i = 0; i < pts.length; i++) if (keep[i]) out.push(pts[i]);
+  return out.length >= 3 ? out : pts;
+}
+
+/* ============================================================
+   SVG → contours
+   ============================================================ */
+const GEOM_SEL = 'path, circle, ellipse, rect, polygon, polyline, line';
+const SKIP_ANCESTORS = 'defs, clipPath, mask, marker, symbol, pattern';
+
+const colorCache = new Map();
+let sawGradient = false;
+function toRGBHex(str){
+  if (!str) return null;
+  str = str.trim();
+  if (str === 'none' || str === 'transparent') return null;
+  if (colorCache.has(str)) return colorCache.get(str);
+  if (str.indexOf('url(') === 0){
+    sawGradient = true;
+    colorCache.set(str, '#9a9a9a');
+    return '#9a9a9a';
+  }
+  const probe = document.createElement('span');
+  probe.style.color = str;
+  document.body.appendChild(probe);
+  const cs = getComputedStyle(probe).color;
+  probe.remove();
+  const m = cs.match(/rgba?\(([^)]+)\)/);
+  let hex = '#cccccc';
+  if (m){
+    const parts = m[1].split(',').map(v => parseFloat(v));
+    if (parts.length > 3 && parts[3] === 0) hex = null;
+    else {
+      const h = n => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+      hex = '#' + h(parts[0]) + h(parts[1]) + h(parts[2]);
+    }
+  }
+  colorCache.set(str, hex);
+  return hex;
+}
+
+// fallback point extraction if getPointAtLength is unavailable for a shape type
+function fallbackPoints(node){
+  const n = node.tagName.toLowerCase();
+  const num = (a, d) => { const v = parseFloat(node.getAttribute(a)); return isNaN(v) ? d : v; };
+  const pts = [];
+  if (n === 'rect'){
+    const x = num('x',0), y = num('y',0), w = num('width',0), h = num('height',0);
+    pts.push({x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h});
+  } else if (n === 'circle' || n === 'ellipse'){
+    const cx = num('cx',0), cy = num('cy',0);
+    const rx = n === 'circle' ? num('r',0) : num('rx',0);
+    const ry = n === 'circle' ? num('r',0) : num('ry',0);
+    for (let i = 0; i < 72; i++){
+      const a = i / 72 * Math.PI * 2;
+      pts.push({ x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry });
+    }
+  } else if (n === 'polygon' || n === 'polyline'){
+    const raw = (node.getAttribute('points') || '').trim().split(/[\s,]+/).map(Number);
+    for (let i = 0; i + 1 < raw.length; i += 2) pts.push({ x: raw[i], y: raw[i+1] });
+  } else if (n === 'line'){
+    pts.push({ x: num('x1',0), y: num('y1',0) }, { x: num('x2',0), y: num('y2',0) });
+  }
+  return pts.length >= 2 ? [pts] : [];
+}
+
+function sampleNode(node, step){
+  let total = 0;
+  try { total = node.getTotalLength(); } catch(_){ total = 0; }
+  if (!total || !isFinite(total)) return fallbackPoints(node);
+  let n = Math.ceil(total / step);
+  n = Math.max(12, Math.min(n, 24000));
+  const s = total / n;
+  const gap = s * 2.2 + 1e-6;
+  const subs = [];
+  let cur = [], prev = null;
+  for (let i = 0; i <= n; i++){
+    let p;
+    try { p = node.getPointAtLength(i * s); } catch(_){ break; }
+    if (prev && Math.hypot(p.x - prev.x, p.y - prev.y) > gap){
+      if (cur.length > 2) subs.push(cur);
+      cur = [];
+    }
+    cur.push({ x: p.x, y: p.y });
+    prev = p;
+  }
+  if (cur.length > 2) subs.push(cur);
+  return subs;
+}
+
+function strokeToContours(pts, width){
+  const n0 = pts.length;
+  if (n0 < 2) return [];
+  const closed = Math.hypot(pts[0].x - pts[n0-1].x, pts[0].y - pts[n0-1].y) < Math.max(width * 0.1, 1e-4);
+  const p = closed ? pts.slice(0, -1) : pts.slice();
+  const n = p.length;
+  if (n < 2) return [];
+  const h = Math.max(width / 2, 1e-4);
+  const L = [], R = [];
+  const norm = v => { const m = Math.hypot(v.x, v.y) || 1; return { x: v.x / m, y: v.y / m }; };
+  for (let i = 0; i < n; i++){
+    const prev = p[(i - 1 + n) % n], next = p[(i + 1) % n];
+    let d1, d2;
+    if (!closed && i === 0){ d1 = d2 = norm({ x: p[1].x - p[0].x, y: p[1].y - p[0].y }); }
+    else if (!closed && i === n - 1){ d1 = d2 = norm({ x: p[n-1].x - p[n-2].x, y: p[n-1].y - p[n-2].y }); }
+    else {
+      d1 = norm({ x: p[i].x - prev.x, y: p[i].y - prev.y });
+      d2 = norm({ x: next.x - p[i].x, y: next.y - p[i].y });
+    }
+    let t = norm({ x: d1.x + d2.x, y: d1.y + d2.y });
+    if (!isFinite(t.x) || (t.x === 0 && t.y === 0)) t = d2;
+    const nm = { x: -t.y, y: t.x };
+    const sn = { x: -d2.y, y: d2.x };
+    const f = 1 / Math.max(0.4, nm.x * sn.x + nm.y * sn.y);
+    L.push({ x: p[i].x + nm.x * h * f, y: p[i].y + nm.y * h * f });
+    R.push({ x: p[i].x - nm.x * h * f, y: p[i].y - nm.y * h * f });
+  }
+  if (closed) return [L, R.reverse()];
+  return [L.concat(R.reverse())];
+}
+
+function parseSVG(text, quality){
+  const warnings = [];
+  const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+  if (doc.querySelector('parsererror')) throw new Error("That file isn't valid SVG.");
+  const src = doc.documentElement;
+  if (!src || src.tagName.toLowerCase() !== 'svg') throw new Error("That file isn't valid SVG.");
+
+  const svg = document.importNode(src, true);
+  let vb = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+  if (vb.length !== 4 || vb.some(isNaN)){
+    const w = parseFloat(svg.getAttribute('width')) || 300;
+    const h = parseFloat(svg.getAttribute('height')) || 300;
+    vb = [0, 0, w, h];
+    svg.setAttribute('viewBox', vb.join(' '));
+  }
+  svg.setAttribute('width', vb[2]);
+  svg.setAttribute('height', vb[3]);
+  svg.style.position = 'absolute';
+
+  const sandbox = el('sandbox');
+  sandbox.innerHTML = '';
+  sandbox.appendChild(svg);
+
+  if (svg.querySelector('text')) warnings.push('Text elements are ignored. Convert text to outlines in your editor, then re-open the file.');
+  if (svg.querySelector('use')) warnings.push('Reused symbols (<use>) are ignored.');
+  if (svg.querySelector('image')) warnings.push('Embedded bitmap images are ignored.');
+
+  const diag = Math.hypot(vb[2], vb[3]) || 100;
+  const step = Math.max(diag * 0.0022 / quality * 2, 0.02);
+
+  const groups = [];
+  let usedStroke = false;
+  sawGradient = false;
+  const nodes = svg.querySelectorAll(GEOM_SEL);
+
+  nodes.forEach(node => {
+    if (node.closest(SKIP_ANCESTORS)) return;
+    const cs = getComputedStyle(node);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return;
+
+    const m = node.getCTM();
+    if (!m) return;
+    const scaleFactor = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) || 1;
+
+    const fillHex = toRGBHex(cs.fill);
+    const strokeHex = toRGBHex(cs.stroke);
+    const strokeW = parseFloat(cs.strokeWidth) || 0;
+    const useStroke = !fillHex && strokeHex && strokeW > 0;
+    if (!fillHex && !useStroke) return;
+
+    const subs = sampleNode(node, step / scaleFactor);
+    if (!subs.length) return;
+
+    const contours = [];
+    for (let raw of subs){
+      // to root user space, then flip Y for a Y-up world
+      let pts = raw.map(p => ({
+        x: m.a * p.x + m.c * p.y + m.e,
+        y: -(m.b * p.x + m.d * p.y + m.f)
+      }));
+      pts = simplify(pts, step * 0.18);
+      if (pts.length < 3 && !useStroke) continue;
+      if (useStroke){
+        usedStroke = true;
+        for (const c of strokeToContours(pts, strokeW * scaleFactor)){
+          if (c.length >= 3) contours.push(c);
+        }
+      } else {
+        contours.push(pts);
+      }
+    }
+    if (!contours.length) return;
+    groups.push({ color: fillHex || strokeHex, contours });
+  });
+
+  sandbox.innerHTML = '';
+
+  if (!groups.length) throw new Error('No filled shapes found in that SVG.');
+  if (usedStroke) warnings.push('Some strokes were approximated as outlines. Flattening strokes to fills gives cleaner corners.');
+  if (sawGradient) warnings.push('Gradient and pattern fills became flat grey. Set a single colour under Material, or replace the gradients in your editor.');
+
+  // bounds across everything
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const g of groups) for (const c of g.contours) for (const p of c){
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  const unit = Math.max(maxX - minX, maxY - minY) || 1;
+  return {
+    groups, warnings, unit, minY, maxY,
+    cx: (minX + maxX) / 2,
+    cy: (minY + maxY) / 2
+  };
+}
+
+/* Nest contours into THREE.Shape objects with holes (per element) */
+function contoursToShapes(contours){
+  const items = contours.map(pts => ({
+    pts, a: Math.abs(signedArea(pts)), signed: signedArea(pts)
+  })).filter(c => c.a > 1e-9);
+  items.sort((x, y) => y.a - x.a);
+
+  const parent = new Array(items.length).fill(-1);
+  const depth = new Array(items.length).fill(0);
+  for (let i = 0; i < items.length; i++){
+    for (let j = i - 1; j >= 0; j--){       // larger areas come first
+      if (pointInPoly(items[i].pts[0], items[j].pts)){ parent[i] = j; break; }
+    }
+    depth[i] = parent[i] === -1 ? 0 : depth[parent[i]] + 1;
+  }
+
+  const shapes = [];
+  const shapeOf = new Array(items.length).fill(null);
+  for (let i = 0; i < items.length; i++){
+    const pts = items[i].pts.slice();
+    const ccw = items[i].signed > 0;
+    if (depth[i] % 2 === 0){
+      if (!ccw) pts.reverse();
+      const s = new THREE.Shape(pts.map(p => new THREE.Vector2(p.x, p.y)));
+      shapeOf[i] = s;
+      shapes.push(s);
+    } else {
+      if (ccw) pts.reverse();
+      const hole = new THREE.Path(pts.map(p => new THREE.Vector2(p.x, p.y)));
+      const host = shapeOf[parent[i]];
+      if (host) host.holes.push(hole);
+    }
+  }
+  return shapes;
+}
+
+/* ============================================================
+   Model build
+   ============================================================ */
+const materials = new Map();   // hex -> material
+let meshes = [];
+
+const PRESETS = {
+  matte:    { metalness: 0.00, roughness: 0.62, clearcoat: 0.0, transmission: 0, envIntensity: 0.9 },
+  plastic:  { metalness: 0.00, roughness: 0.28, clearcoat: 0.7, transmission: 0, envIntensity: 1.1 },
+  metal:    { metalness: 1.00, roughness: 0.32, clearcoat: 0.0, transmission: 0, envIntensity: 1.2 },
+  chrome:   { metalness: 1.00, roughness: 0.04, clearcoat: 0.0, transmission: 0, envIntensity: 1.7, tint: '#f4f7fa' },
+  gold:     { metalness: 1.00, roughness: 0.18, clearcoat: 0.0, transmission: 0, envIntensity: 1.5, tint: '#f2c14e' },
+  copper:   { metalness: 1.00, roughness: 0.24, clearcoat: 0.0, transmission: 0, envIntensity: 1.4, tint: '#c07a44' },
+  gradient: { metalness: 0.25, roughness: 0.22, clearcoat: 0.6, transmission: 0, envIntensity: 1.2, gradient: true },
+  glass:    { metalness: 0.00, roughness: 0.06, clearcoat: 1.0, transmission: 0.92, envIntensity: 1.4 }
+};
+
+function disposeModel(){
+  for (const m of meshes){ m.geometry.dispose(); inner.remove(m); }
+  meshes = [];
+}
+
+function getMaterial(hex){
+  const p = PRESETS[state.preset];
+  let key;
+  if (p.gradient) key = '@gradient';
+  else if (p.tint) key = '@tint:' + p.tint;
+  else key = state.colorMode === 'single' ? state.baseColor : hex;
+  if (materials.has(key)) return materials.get(key);
+
+  const base = p.gradient ? '#ffffff' : (p.tint || key);
+  const m = new THREE.MeshPhysicalMaterial({ color: new THREE.Color(base), side: THREE.DoubleSide });
+  if (p.gradient) attachGradient(m);
+  materials.set(key, m);
+  applyMaterialSettings(m);
+  return m;
+}
+
+/* paints a ramp between two colours up the height of the model */
+function attachGradient(m){
+  m.onBeforeCompile = shader => {
+    shader.uniforms.gA = { value: new THREE.Color(state.gradA) };
+    shader.uniforms.gB = { value: new THREE.Color(state.gradB) };
+    shader.uniforms.gMin = { value: parsed ? parsed.minY : 0 };
+    shader.uniforms.gMax = { value: parsed ? parsed.maxY : 1 };
+    shader.vertexShader = 'varying float vGrad;\n' + shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\n  vGrad = position.y;'
+    );
+    shader.fragmentShader =
+      'uniform vec3 gA;\nuniform vec3 gB;\nuniform float gMin;\nuniform float gMax;\nvarying float vGrad;\n' +
+      shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        '#include <color_fragment>\n  diffuseColor.rgb = mix(gB, gA, clamp((vGrad - gMin) / max(gMax - gMin, 0.0001), 0.0, 1.0));'
+      );
+    m.userData.shader = shader;
+  };
+  m.customProgramCacheKey = () => 'extrude-gradient';
+}
+
+function refreshGradient(){
+  for (const m of materials.values()){
+    const sh = m.userData && m.userData.shader;
+    if (!sh) continue;
+    sh.uniforms.gA.value.set(state.gradA);
+    sh.uniforms.gB.value.set(state.gradB);
+    sh.uniforms.gMin.value = parsed ? parsed.minY : 0;
+    sh.uniforms.gMax.value = parsed ? parsed.maxY : 1;
+  }
+}
+
+/* swap materials without re-extruding the geometry */
+function reassignMaterials(){
+  for (const m of materials.values()) m.dispose();
+  materials.clear();
+  for (const mesh of meshes) mesh.material = getMaterial(mesh.userData.color);
+  refreshGradient();
+}
+
+function applyMaterialSettings(m){
+  const p = PRESETS[state.preset];
+  m.metalness = state.metalness;
+  m.roughness = state.roughness;
+  m.clearcoat = p.clearcoat;
+  m.clearcoatRoughness = 0.15;
+  m.transmission = p.transmission;
+  m.thickness = p.transmission ? 0.6 : 0;
+  m.transparent = p.transmission > 0;
+  m.opacity = 1;
+  m.envMapIntensity = p.envIntensity;
+  m.flatShading = false;
+  m.needsUpdate = true;
+}
+
+function refreshMaterials(){
+  for (const m of materials.values()) applyMaterialSettings(m);
+}
+
+function rebuildModel(){
+  if (!parsed) return;
+  disposeModel();
+  for (const m of materials.values()) m.dispose();
+  materials.clear();
+
+  const unit = parsed.unit;
+  const depth = Math.max(unit * state.depth, unit * 0.0015);
+  const bevel = state.bevel * unit;
+  const bevelOn = bevel > 0.0001;
+  const zStep = parsed.groups.length > 1 ? unit * 0.0012 : 0;
+
+  let tris = 0, shapeCount = 0;
+
+  parsed.groups.forEach((g, i) => {
+    const shapes = contoursToShapes(g.contours);
+    if (!shapes.length) return;
+    shapeCount += shapes.length;
+    let geo;
+    try {
+      geo = new THREE.ExtrudeGeometry(shapes, {
+        depth,
+        bevelEnabled: bevelOn,
+        bevelThickness: bevel,
+        bevelSize: bevel,
+        bevelOffset: 0,
+        bevelSegments: bevelOn ? state.bevelSeg : 0,
+        curveSegments: 1,
+        steps: 1
+      });
+    } catch(_){ return; }
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, getMaterial(g.color));
+    mesh.userData.color = g.color;
+    mesh.position.z = i * zStep;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    inner.add(mesh);
+    meshes.push(mesh);
+    tris += geo.attributes.position.count / 3;
+  });
+
+  inner.position.set(-parsed.cx, -parsed.cy, -depth / 2);
+  wrapper.scale.setScalar(2 / unit);
+
+  refreshGradient();
+
+  el('statShapes').textContent = shapeCount + (shapeCount === 1 ? ' shape' : ' shapes');
+  el('statTris').textContent = Math.round(tris).toLocaleString() + ' triangles';
+}
+
+function applyRotation(){
+  wrapper.rotation.set(
+    THREE.MathUtils.degToRad(state.rotX),
+    THREE.MathUtils.degToRad(state.rotY) + spinAngle,
+    THREE.MathUtils.degToRad(state.rotZ)
+  );
+}
+
+function applyLighting(){
+  const L = {
+    studio:   { key:[3,4,4,2.2],   fill:[-4,1,3,0.55], rim:[-2,3,-4,1.0], amb:0.35 },
+    soft:     { key:[2,4,5,1.3],   fill:[-3,2,4,1.0],  rim:[0,2,-4,0.6],  amb:0.85 },
+    contrast: { key:[4,5,2,3.4],   fill:[-4,0,2,0.18], rim:[-3,1,-4,0.5], amb:0.12 },
+    rim:      { key:[2,3,4,0.9],   fill:[-4,1,2,0.4],  rim:[-2,2,-5,3.0], amb:0.3 }
+  }[state.lighting];
+  key.position.set(L.key[0], L.key[1], L.key[2]);  key.intensity = L.key[3];
+  fill.position.set(L.fill[0], L.fill[1], L.fill[2]); fill.intensity = L.fill[3];
+  rim.position.set(L.rim[0], L.rim[1], L.rim[2]);  rim.intensity = L.rim[3];
+  amb.intensity = L.amb;
+  renderer.toneMappingExposure = state.exposure;
+}
+
+function applyScene(){
+  ground.visible = state.shadow;
+  renderer.shadowMap.enabled = state.shadow;
+  viewport.style.background = state.transparent ? '' : state.bgColor;
+  viewport.classList.toggle('checker', state.transparent);
+  for (const m of meshes) m.castShadow = state.shadow;
+}
+
+/* ============================================================
+   Render loop
+   ============================================================ */
+let spinAngle = 0;
+let exporting = false;
+let last = performance.now();
+function tick(now){
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  if (!exporting){
+    if (state.spin && !orbit.dragging) spinAngle += dt * THREE.MathUtils.degToRad(state.spinSpeed);
+    applyRotation();
+    updateCamera();
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+function resize(){
+  const w = viewport.clientWidth, h = viewport.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport);
+resize();
+
+/* ============================================================
+   Loading files
+   ============================================================ */
+function showNotices(list){
+  const box = el('notices');
+  box.innerHTML = '';
+  for (const t of list){
+    const d = document.createElement('div');
+    d.className = 'notice';
+    d.textContent = t;
+    box.appendChild(d);
+  }
+}
+
+function loadSVG(text, name){
+  try {
+    parsed = parseSVG(text, state.quality);
+  } catch(err){
+    showNotices([err.message + ' Try a file with filled paths, or use the sample to see how it works.']);
+    return;
+  }
+  sourceSVG = text;
+  fileBase = (name || 'model').replace(/\.svg$/i, '');
+  el('filename').textContent = name || 'sample.svg';
+  el('empty').hidden = true;
+  el('readout').hidden = false;
+  el('hint').hidden = false;
+  el('btnExport').disabled = false;
+  el('btnExport2').disabled = false;
+  showNotices(parsed.warnings);
+  rebuildModel();
+  applyScene();
+  resetView();
+}
+
+function readFile(file){
+  if (!file) return;
+  if (!/svg/i.test(file.type) && !/\.svg$/i.test(file.name)){
+    showNotices(['That file is not an SVG. Choose a .svg file.']);
+    return;
+  }
+  const fr = new FileReader();
+  fr.onload = () => loadSVG(String(fr.result), file.name);
+  fr.onerror = () => showNotices(["That file couldn't be read. Try saving it again from your editor."]);
+  fr.readAsText(file);
+}
+
+const SAMPLE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <path fill="#e6e3dd" fill-rule="evenodd" d="M120 10 226 71v122L120 254 14 193V71L120 10Zm0 46L54 94v76l66 38 66-38V94l-66-38Z"/>
+  <path fill="#00d4aa" d="M120 76 174 107v62L120 200 66 169v-62L120 76Z"/>
+  <circle fill="#f4b64c" cx="120" cy="138" r="20"/>
+</svg>`;
+
+/* ============================================================
+   Export
+   ============================================================ */
+function download(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function exportPNG(scale){
+  const w = Math.round(viewport.clientWidth * scale);
+  const h = Math.round(viewport.clientHeight * scale);
+  const oldPR = renderer.getPixelRatio();
+  renderer.setPixelRatio(1);
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
+
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d');
+  if (!state.transparent){
+    ctx.fillStyle = state.bgColor;
+    ctx.fillRect(0, 0, w, h);
+  }
+  ctx.drawImage(renderer.domElement, 0, 0, w, h);
+
+  renderer.setPixelRatio(oldPR);
+  resize();
+
+  out.toBlob(b => download(b, fileBase + '.png'), 'image/png');
+}
+
+function collectTriangleData(){
+  wrapper.updateMatrixWorld(true);
+  const out = [];
+  for (const mesh of meshes){
+    const g = mesh.geometry;
+    const pos = g.attributes.position;
+    const nor = g.attributes.normal;
+    const count = pos.count;
+    const P = new Float32Array(count * 3);
+    const N = new Float32Array(count * 3);
+    const v = new THREE.Vector3();
+    const nmat = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < count; i++){
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+      P[i*3] = v.x; P[i*3+1] = v.y; P[i*3+2] = v.z;
+      for (let k = 0; k < 3; k++){
+        const val = P[i*3+k];
+        if (val < min[k]) min[k] = val;
+        if (val > max[k]) max[k] = val;
+      }
+      v.fromBufferAttribute(nor, i).applyMatrix3(nmat).normalize();
+      N[i*3] = v.x; N[i*3+1] = v.y; N[i*3+2] = v.z;
+    }
+    out.push({ P, N, count, min, max, material: mesh.material });
+  }
+  return out;
+}
+
+function exportGLB(){
+  const parts = collectTriangleData();
+  const json = {
+    asset: { version: '2.0', generator: 'Extrude — SVG to 3D' },
+    scene: 0, scenes: [{ nodes: [] }],
+    nodes: [], meshes: [], materials: [], accessors: [], bufferViews: [], buffers: []
+  };
+  const chunks = [];
+  let binLen = 0;
+
+  function addView(arr){
+    const pad = (4 - (binLen % 4)) % 4;
+    if (pad){ chunks.push(new Uint8Array(pad)); binLen += pad; }
+    json.bufferViews.push({ buffer: 0, byteOffset: binLen, byteLength: arr.byteLength, target: 34962 });
+    chunks.push(new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength));
+    binLen += arr.byteLength;
+    return json.bufferViews.length - 1;
+  }
+
+  parts.forEach((p, i) => {
+    const pv = addView(p.P), nv = addView(p.N);
+    json.accessors.push({ bufferView: pv, componentType: 5126, count: p.count, type: 'VEC3', min: p.min, max: p.max });
+    json.accessors.push({ bufferView: nv, componentType: 5126, count: p.count, type: 'VEC3' });
+    const c = p.material.color.clone().convertSRGBToLinear();
+    json.materials.push({
+      name: 'material_' + i,
+      doubleSided: true,
+      pbrMetallicRoughness: {
+        baseColorFactor: [c.r, c.g, c.b, 1],
+        metallicFactor: p.material.metalness,
+        roughnessFactor: p.material.roughness
+      }
+    });
+    json.meshes.push({
+      primitives: [{
+        attributes: { POSITION: json.accessors.length - 2, NORMAL: json.accessors.length - 1 },
+        material: json.materials.length - 1,
+        mode: 4
+      }]
+    });
+    json.nodes.push({ mesh: json.meshes.length - 1, name: 'part_' + i });
+    json.scenes[0].nodes.push(json.nodes.length - 1);
+  });
+
+  const binPad = (4 - (binLen % 4)) % 4;
+  if (binPad){ chunks.push(new Uint8Array(binPad)); binLen += binPad; }
+  json.buffers = [{ byteLength: binLen }];
+
+  let jsonBytes = new TextEncoder().encode(JSON.stringify(json));
+  const jPad = (4 - (jsonBytes.length % 4)) % 4;
+  if (jPad){
+    const t = new Uint8Array(jsonBytes.length + jPad);
+    t.set(jsonBytes);
+    t.fill(0x20, jsonBytes.length);
+    jsonBytes = t;
+  }
+
+  const total = 12 + 8 + jsonBytes.length + 8 + binLen;
+  const buf = new ArrayBuffer(total);
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  dv.setUint32(0, 0x46546C67, true);   // glTF
+  dv.setUint32(4, 2, true);
+  dv.setUint32(8, total, true);
+  dv.setUint32(12, jsonBytes.length, true);
+  dv.setUint32(16, 0x4E4F534A, true);  // JSON
+  u8.set(jsonBytes, 20);
+  let off = 20 + jsonBytes.length;
+  dv.setUint32(off, binLen, true);
+  dv.setUint32(off + 4, 0x004E4942, true); // BIN
+  off += 8;
+  for (const c of chunks){ u8.set(c, off); off += c.length; }
+
+  download(new Blob([buf], { type: 'model/gltf-binary' }), fileBase + '.glb');
+}
+
+function exportOBJ(){
+  const parts = collectTriangleData();
+  const lines = ['# Extrude — SVG to 3D'];
+  let base = 1;
+  parts.forEach((p, i) => {
+    lines.push('o part_' + i);
+    for (let k = 0; k < p.count; k++) lines.push('v ' + p.P[k*3].toFixed(5) + ' ' + p.P[k*3+1].toFixed(5) + ' ' + p.P[k*3+2].toFixed(5));
+    for (let k = 0; k < p.count; k++) lines.push('vn ' + p.N[k*3].toFixed(5) + ' ' + p.N[k*3+1].toFixed(5) + ' ' + p.N[k*3+2].toFixed(5));
+    for (let k = 0; k < p.count; k += 3){
+      const a = base + k, b = base + k + 1, c = base + k + 2;
+      lines.push('f ' + a + '//' + a + ' ' + b + '//' + b + ' ' + c + '//' + c);
+    }
+    base += p.count;
+  });
+  download(new Blob([lines.join('\n')], { type: 'text/plain' }), fileBase + '.obj');
+}
+
+function exportSTL(){
+  const parts = collectTriangleData();
+  let tris = 0;
+  for (const p of parts) tris += p.count / 3;
+  const buf = new ArrayBuffer(84 + tris * 50);
+  const dv = new DataView(buf);
+  dv.setUint32(80, tris, true);
+  let o = 84;
+  for (const p of parts){
+    for (let k = 0; k < p.count; k += 3){
+      const nx = (p.N[k*3] + p.N[(k+1)*3] + p.N[(k+2)*3]) / 3;
+      const ny = (p.N[k*3+1] + p.N[(k+1)*3+1] + p.N[(k+2)*3+1]) / 3;
+      const nz = (p.N[k*3+2] + p.N[(k+1)*3+2] + p.N[(k+2)*3+2]) / 3;
+      dv.setFloat32(o, nx, true); dv.setFloat32(o+4, ny, true); dv.setFloat32(o+8, nz, true);
+      o += 12;
+      for (let t = 0; t < 3; t++){
+        const idx = (k + t) * 3;
+        dv.setFloat32(o, p.P[idx], true);
+        dv.setFloat32(o+4, p.P[idx+1], true);
+        dv.setFloat32(o+8, p.P[idx+2], true);
+        o += 12;
+      }
+      dv.setUint16(o, 0, true); o += 2;
+    }
+  }
+  download(new Blob([buf], { type: 'model/stl' }), fileBase + '.stl');
+}
+
+function runExport(){
+  if (!parsed) return;
+  const f = el('format').value;
+  if (f === 'png') exportPNG(parseInt(el('pngScale').value, 10));
+  else if (f === 'glb') exportGLB();
+  else if (f === 'obj') exportOBJ();
+  else if (f === 'stl') exportSTL();
+  else if (f === 'gif') exportGIF();
+}
+
+/* ============================================================
+   Spinning GIF
+   ============================================================ */
+let gifLib = null;
+async function loadGifEncoder(){
+  if (gifLib) return gifLib;
+  const base = 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/';
+  await new Promise((res, rej) => {
+    const tag = document.createElement('script');
+    tag.src = base + 'gif.js';
+    tag.onload = res;
+    tag.onerror = () => rej(new Error('script'));
+    document.head.appendChild(tag);
+  });
+  // the worker has to be same-origin, so fetch it and hand over a blob URL
+  const code = await fetch(base + 'gif.worker.js').then(r => r.text());
+  gifLib = {
+    GIF: window.GIF,
+    worker: URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))
+  };
+  return gifLib;
+}
+
+function setExportBusy(busy){
+  el('btnExport').disabled = busy;
+  el('btnExport2').disabled = busy;
+}
+
+async function exportGIF(){
+  if (exporting) return;
+  let lib;
+  setExportBusy(true);
+  el('exportNote').textContent = 'Loading the GIF encoder…';
+  try {
+    lib = await loadGifEncoder();
+  } catch(_){
+    setExportBusy(false);
+    updateExportNote();
+    showNotices(['The GIF encoder could not be loaded. Check your connection, or export a PNG instead.']);
+    return;
+  }
+
+  const W = parseInt(el('gifSize').value, 10);
+  const H = Math.max(2, Math.round(W * viewport.clientHeight / viewport.clientWidth));
+  const frames = 36;
+  const delay = Math.max(20, Math.min(200, Math.round(1000 * (360 / state.spinSpeed) / frames)));
+
+  exporting = true;
+  const oldPR = renderer.getPixelRatio();
+  const oldAngle = spinAngle;
+
+  // settle the camera so the turn is the only thing moving
+  orbit.theta = orbit.tTheta; orbit.phi = orbit.tPhi;
+  orbit.radius = orbit.tRadius; orbit.target.copy(orbit.tTarget);
+  updateCamera();
+
+  renderer.setPixelRatio(1);
+  renderer.setSize(W, H, false);
+  camera.aspect = W / H;
+  camera.updateProjectionMatrix();
+
+  const gif = new lib.GIF({ workers: 2, quality: 8, width: W, height: H, workerScript: lib.worker, repeat: 0 });
+  const frame = document.createElement('canvas');
+  frame.width = W; frame.height = H;
+  const fctx = frame.getContext('2d');
+
+  for (let i = 0; i < frames; i++){
+    spinAngle = oldAngle + (i / frames) * Math.PI * 2;
+    applyRotation();
+    renderer.render(scene, camera);
+    fctx.fillStyle = state.bgColor;
+    fctx.fillRect(0, 0, W, H);
+    fctx.drawImage(renderer.domElement, 0, 0, W, H);
+    gif.addFrame(fctx, { copy: true, delay: delay });
+  }
+
+  gif.on('progress', pct => { el('exportNote').textContent = 'Encoding GIF — ' + Math.round(pct * 100) + '%'; });
+  gif.on('finished', blob => {
+    download(blob, fileBase + '-spin.gif');
+    setExportBusy(false);
+    updateExportNote();
+  });
+  gif.render();
+
+  // hand the view straight back while the workers finish
+  spinAngle = oldAngle;
+  applyRotation();
+  renderer.setPixelRatio(oldPR);
+  resize();
+  exporting = false;
+}
+
+/* ============================================================
+   UI wiring
+   ============================================================ */
+const sliders = {};
+function slider(id, valId, apply, format){
+  const input = el(id), out = el(valId);
+  const sync = () => { out.textContent = format(parseFloat(input.value)); };
+  input.addEventListener('input', () => { sync(); apply(parseFloat(input.value)); });
+  sliders[id] = { input, sync, apply };
+  sync();
+}
+function setSlider(id, value){
+  const s = sliders[id];
+  if (!s) return;
+  s.input.value = value;
+  s.sync();
+  s.apply(parseFloat(s.input.value));
+}
+
+slider('depth', 'vDepth', v => { state.depth = v / 100; drawProfile(); rebuildModel(); }, v => (v / 100).toFixed(2) + '×');
+slider('bevel', 'vBevel', v => { state.bevel = v / 1000; drawProfile(); rebuildModel(); }, v => (v / 10).toFixed(1) + '%');
+slider('bevelSeg', 'vBevelSeg', v => { state.bevelSeg = v; rebuildModel(); }, v => String(v));
+slider('quality', 'vQuality', v => {
+  state.quality = v;
+  if (!sourceSVG) return;
+  try {
+    parsed = parseSVG(sourceSVG, v);
+    showNotices(parsed.warnings);
+    rebuildModel();
+  } catch(err){
+    showNotices([err.message]);
+  }
+}, v => String(v));
+slider('rotX', 'vRotX', v => { state.rotX = v; }, v => v + '°');
+slider('rotY', 'vRotY', v => { state.rotY = v; }, v => v + '°');
+slider('rotZ', 'vRotZ', v => { state.rotZ = v; }, v => v + '°');
+slider('metalness', 'vMetal', v => { state.metalness = v / 100; refreshMaterials(); }, v => v + '%');
+slider('roughness', 'vRough', v => { state.roughness = v / 100; refreshMaterials(); }, v => v + '%');
+slider('spinSpeed', 'vSpinSpeed', v => { state.spinSpeed = v; }, v => v + '\u00b0/s');
+slider('exposure', 'vExposure', v => { state.exposure = v / 100; applyLighting(); }, v => (v / 100).toFixed(2));
+
+function switchBtn(id, apply){
+  const b = el(id);
+  b.addEventListener('click', () => {
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(on));
+    apply(on);
+  });
+}
+switchBtn('spin', on => { state.spin = on; });
+switchBtn('transparent', on => { state.transparent = on; applyScene(); updateExportNote(); });
+switchBtn('shadow', on => { state.shadow = on; applyScene(); });
+
+function segmented(id, attr, apply){
+  const wrap = el(id);
+  wrap.addEventListener('click', e => {
+    const btn = e.target.closest('.chip, .mat');
+    if (!btn) return;
+    wrap.querySelectorAll('.chip, .mat').forEach(c => c.setAttribute('aria-pressed', String(c === btn)));
+    apply(btn.dataset[attr]);
+  });
+}
+segmented('matPreset', 'preset', p => {
+  state.preset = p;
+  const d = PRESETS[p];
+  state.metalness = d.metalness;
+  state.roughness = d.roughness;
+  el('metalness').value = Math.round(d.metalness * 100);
+  el('roughness').value = Math.round(d.roughness * 100);
+  el('vMetal').textContent = Math.round(d.metalness * 100) + '%';
+  el('vRough').textContent = Math.round(d.roughness * 100) + '%';
+  updateColourUI();
+  reassignMaterials();
+});
+segmented('colorMode', 'mode', m => {
+  state.colorMode = m;
+  el('singleColorField').hidden = m !== 'single';
+  reassignMaterials();
+});
+
+/* finishes that carry their own colour hide the colour picker */
+function updateColourUI(){
+  const p = PRESETS[state.preset];
+  el('colourBlock').hidden = !!(p.tint || p.gradient);
+  el('gradientField').hidden = !p.gradient;
+  el('tintNote').hidden = !p.tint;
+}
+
+el('baseColor').addEventListener('input', e => { state.baseColor = e.target.value; syncHex(); if (state.colorMode === 'single') reassignMaterials(); });
+el('bgColor').addEventListener('input', e => { state.bgColor = e.target.value; syncHex(); applyScene(); });
+el('gradA').addEventListener('input', e => { state.gradA = e.target.value; refreshGradient(); });
+el('gradB').addEventListener('input', e => { state.gradB = e.target.value; refreshGradient(); });
+el('lighting').addEventListener('change', e => { state.lighting = e.target.value; applyLighting(); });
+
+function updateExportNote(){
+  const f = el('format').value;
+  const note = {
+    png: 'PNG uses the current view at ' + el('pngScale').value + '× the canvas size.',
+    glb: 'GLB keeps colours and materials. Opens in Blender, Figma, Spline, and the web.',
+    obj: 'OBJ carries geometry only. Materials are reassigned in your 3D tool.',
+    stl: 'STL is geometry only, sized for 3D printing at 2 units across.',
+    gif: 'GIF loops one full turn in 36 frames at the current spin speed, on the background colour.'
+  }[f];
+  el('exportNote').textContent = note;
+  el('pngScale').hidden = f !== 'png';
+  el('gifSize').hidden = f !== 'gif';
+}
+el('format').addEventListener('change', updateExportNote);
+el('pngScale').addEventListener('change', updateExportNote);
+el('gifSize').addEventListener('change', updateExportNote);
+updateExportNote();
+
+el('btnExport').addEventListener('click', runExport);
+el('btnExport2').addEventListener('click', runExport);
+function resetAngles(){
+  setSlider('rotX', 0);
+  setSlider('rotY', 0);
+  setSlider('rotZ', 0);
+  spinAngle = 0;
+}
+el('btnResetAngles').addEventListener('click', resetAngles);
+el('btnReset').addEventListener('click', resetView);
+el('btnRecentre').addEventListener('click', resetView);
+el('btnOpen').addEventListener('click', () => el('file').click());
+el('btnPick').addEventListener('click', () => el('file').click());
+el('btnSample').addEventListener('click', () => loadSVG(SAMPLE, 'sample.svg'));
+el('file').addEventListener('change', e => { readFile(e.target.files[0]); e.target.value = ''; });
+
+['dragenter','dragover'].forEach(t => viewport.addEventListener(t, e => {
+  e.preventDefault(); viewport.classList.add('dragging');
+}));
+['dragleave','drop'].forEach(t => viewport.addEventListener(t, e => {
+  e.preventDefault();
+  if (t === 'dragleave' && e.relatedTarget && viewport.contains(e.relatedTarget)) return;
+  viewport.classList.remove('dragging');
+}));
+viewport.addEventListener('drop', e => {
+  const f = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) readFile(f);
+});
+
+/* ============================================================
+   Live section drawing of the extrusion profile
+   ============================================================ */
+const prof = {
+  slab: el('pSlab'), extH: el('pExtH'), extV: el('pExtV'),
+  dimH: el('pDimH'), dimV: el('pDimV'), lead: el('pLead'),
+  tDepth: el('tDepth'), tBevel: el('tBevel')
+};
+function drawProfile(){
+  const FH = 56, cx = 132, cy = 46;
+  const y0 = cy - FH / 2, y1 = cy + FH / 2;
+  const w = Math.max(state.depth * FH, 2);
+  const x0 = cx - w / 2, x1 = cx + w / 2;
+  let b = Math.min(state.bevel * FH, w / 2 - 0.3, FH / 2 - 0.3);
+  if (!(b > 0.25)) b = 0;
+
+  prof.slab.setAttribute('d', b
+    ? 'M' + (x0+b) + ' ' + y0 + ' H' + (x1-b) + ' L' + x1 + ' ' + (y0+b) +
+      ' V' + (y1-b) + ' L' + (x1-b) + ' ' + y1 + ' H' + (x0+b) +
+      ' L' + x0 + ' ' + (y1-b) + ' V' + (y0+b) + ' Z'
+    : 'M' + x0 + ' ' + y0 + ' H' + x1 + ' V' + y1 + ' H' + x0 + ' Z');
+
+  const dy = y1 + 16;
+  prof.extH.setAttribute('d', 'M' + x0 + ' ' + (y1+3) + ' V' + (dy+5) + ' M' + x1 + ' ' + (y1+3) + ' V' + (dy+5));
+  prof.dimH.setAttribute('d', 'M' + (x0-11) + ' ' + dy + ' H' + (x1+11) +
+    ' M' + (x0-3) + ' ' + (dy+3) + ' l6 -6 M' + (x1-3) + ' ' + (dy+3) + ' l6 -6');
+  prof.tDepth.setAttribute('x', cx);
+  prof.tDepth.setAttribute('y', dy + 13);
+  prof.tDepth.textContent = state.depth.toFixed(2);
+
+  const vx = 44;
+  prof.extV.setAttribute('d', 'M' + (x0-4) + ' ' + y0 + ' H' + (vx-5) + ' M' + (x0-4) + ' ' + y1 + ' H' + (vx-5));
+  prof.dimV.setAttribute('d', 'M' + vx + ' ' + (y0-11) + ' V' + (y1+11) +
+    ' M' + (vx-3) + ' ' + (y0-3) + ' l6 -6 M' + (vx-3) + ' ' + (y1+3) + ' l6 -6');
+
+  const lx = x1 + 26, ly = y0 - 10;
+  prof.lead.setAttribute('d', 'M' + (x1 - b*0.5) + ' ' + (y0 + b*0.5) + ' L' + lx + ' ' + ly + ' H' + (lx+20));
+  prof.tBevel.setAttribute('x', lx + 25);
+  prof.tBevel.setAttribute('y', ly + 3);
+  prof.tBevel.textContent = (state.bevel * 100).toFixed(1) + '%';
+}
+
+function syncHex(){
+  el('hexBase').textContent = state.baseColor;
+  el('hexBg').textContent = state.bgColor;
+}
+
+/* boot */
+applyLighting();
+applyScene();
+updateColourUI();
+drawProfile();
+syncHex();
+loadSVG(SAMPLE, 'sample.svg');
+})();
+</script>
+</body>
+</html>
